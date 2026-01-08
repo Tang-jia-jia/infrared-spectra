@@ -90,122 +90,111 @@
     <div id="compoundList" class="compound-list"></div>
     
     <div id="plotly-chart" style="display:none;">
-    <h2 id="chart-title"></h2>
-    <div id="chart"></div>
-    <!-- 添加切换按钮 -->
-    <div style="text-align: center; margin-top: 20px;">
-        <button id="toggleModeBtn" onclick="toggleYAxisMode()">切换到吸光度</button>
+        <h2 id="chart-title"></h2>
+        <div id="chart"></div>
+        <div style="text-align: center; margin-top: 20px;">
+            <button id="toggleModeBtn" onclick="toggleYAxisMode()">切换到吸光度</button>
+        </div>
     </div>
-</div>
 
- <script>
-// 当前显示模式
-let currentMode = 'transmittance';
-let currentCompound = null;
+    <script src="compounds_data.js"></script>
+    <script>
+        // 当前显示模式
+        let currentMode = 'transmittance';
+        let currentCompound = null;
 
-// 数据转换函数
-function transmittance_to_absorbance(T) {
-    if (T <= 0) return 4;
-    return -Math.log10(T / 100);
-}
+        // 数据转换函数
+        function transmittance_to_absorbance(T) {
+            if (T <= 0) return 4;
+            return -Math.log10(T / 100);
+        }
 
-function absorbance_to_transmittance(A) {
-    if (A < 0) return 100;
-    return Math.pow(10, -A) * 100;
-}
+        function absorbance_to_transmittance(A) {
+            if (A < 0) return 100;
+            return Math.pow(10, -A) * 100;
+        }
 
-// 光谱数据从外部文件加载
-const spectraData = [];
+        // 显示所有化合物
+        function displayCompounds(compounds) {
+            const listDiv = document.getElementById('compoundList');
+            listDiv.innerHTML = '';
+            
+            compounds.forEach(compound => {
+                const card = document.createElement('div');
+                card.className = 'compound-card';
+                card.innerHTML = `
+                    <div class="compound-name">${compound.name}</div>
+                    <div class="compound-formula">${compound.formula}</div>
+                `;
+                card.onclick = () => {
+                    window.currentCompound = compound;
+                    showSpectrum(compound);
+                };
+                listDiv.appendChild(card);
+            });
+        }
 
-// 使用fetch加载数据
-fetch("compounds_data.js")
-  .then(response => response.text())
-  .then(text => {
-      const jsonData = text.replace('const spectraData = ', '').replace(';', '');
-      const data = JSON.parse(jsonData);
-      spectraData.push(...data);
-      displayCompounds(spectraData);
-  })
-  .catch(error => console.error("加载数据失败:", error));
+        // 显示谱图（支持模式切换）
+        function showSpectrum(compound) {
+            document.getElementById('chart-title').textContent = `${compound.name} (${compound.formula})`;
+            document.getElementById('plotly-chart').style.display = 'block';
+            
+            let y_data, y_title, y_range;
+            if (currentMode === 'transmittance') {
+                y_data = compound.y;
+                y_title = '透过率 (%)';
+                y_range = [0, 100];
+            } else {
+                y_data = compound.y.map(transmittance_to_absorbance);
+                y_title = '吸光度 (A)';
+                y_range = [0, 4];
+            }
+            
+            const trace = {
+                x: compound.x,
+                y: y_data,
+                type: 'scatter',
+                mode: 'lines',
+                name: compound.name,
+                line: { color: '#3498db', width: 2 }
+            };
 
-// 显示所有化合物
-function displayCompounds(compounds) {
-    const listDiv = document.getElementById('compoundList');
-    listDiv.innerHTML = '';
-    
-    compounds.forEach(compound => {
-        const card = document.createElement('div');
-        card.className = 'compound-card';
-        card.innerHTML = `
-            <div class="compound-name">${compound.name}</div>
-            <div class="compound-formula">${compound.formula}</div>
-        `;
-        card.onclick = () => {
-            window.currentCompound = compound;
-            showSpectrum(compound);
-        };
-        listDiv.appendChild(card);
-    });
-}
+            const layout = {
+                title: '红外光谱图',
+                xaxis: { title: '波数 (cm⁻¹)', autorange: 'reversed' },
+                yaxis: { title: y_title, range: y_range },
+                margin: { t: 50, r: 30, b: 50, l: 60 }
+            };
 
-// 显示谱图（支持模式切换）
-function showSpectrum(compound) {
-    document.getElementById('chart-title').textContent = `${compound.name} (${compound.formula})`;
-    document.getElementById('plotly-chart').style.display = 'block';
-    
-    let y_data, y_title, y_range;
-    if (currentMode === 'transmittance') {
-        y_data = compound.y;
-        y_title = '透过率 (%)';
-        y_range = [0, 100];
-    } else {
-        y_data = compound.y.map(transmittance_to_absorbance);
-        y_title = '吸光度 (A)';
-        y_range = [0, 4];
-    }
-    
-    const trace = {
-        x: compound.x,
-        y: y_data,
-        type: 'scatter',
-        mode: 'lines',
-        name: compound.name,
-        line: { color: '#3498db', width: 2 }
-    };
+            Plotly.newPlot('chart', [trace], layout);
+        }
 
-    const layout = {
-        title: '红外光谱图',
-        xaxis: { title: '波数 (cm⁻¹)', autorange: 'reversed' },
-        yaxis: { title: y_title, range: y_range },
-        margin: { t: 50, r: 30, b: 50, l: 60 }
-    };
+        // 搜索功能
+        function searchCompounds() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = spectraData.filter(c => 
+                c.name.toLowerCase().includes(query)
+            );
+            displayCompounds(filtered);
+        }
 
-    Plotly.newPlot('chart', [trace], layout);
-}
+        // 切换Y轴模式
+        function toggleYAxisMode() {
+            const btn = document.getElementById('toggleModeBtn');
+            if (currentMode === 'transmittance') {
+                currentMode = 'absorbance';
+                btn.textContent = '切换到透过率';
+            } else {
+                currentMode = 'transmittance';
+                btn.textContent = '切换到吸光度';
+            }
+            if (window.currentCompound) {
+                showSpectrum(window.currentCompound);
+            }
+        }
 
-// 搜索功能
-function searchCompounds() {
-    const query = document.getElementById('searchInput').value.toLowerCase();
-    const filtered = spectraData.filter(c => 
-        c.name.toLowerCase().includes(query)
-    );
-    displayCompounds(filtered);
-}
-
-// 切换Y轴模式
-function toggleYAxisMode() {
-    const btn = document.getElementById('toggleModeBtn');
-    if (currentMode === 'transmittance') {
-        currentMode = 'absorbance';
-        btn.textContent = '切换到透过率';
-    } else {
-        currentMode = 'transmittance';
-        btn.textContent = '切换到吸光度';
-    }
-    if (window.currentCompound) {
-        showSpectrum(window.currentCompound);
-    }
-}
-</script>
+        // 初始显示所有
+        displayCompounds(spectraData);
+    </script>
 </body>
 </html>
