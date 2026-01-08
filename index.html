@@ -98,7 +98,7 @@
     </div>
 </div>
 
-  <script>
+ <script>
 // 当前显示模式
 let currentMode = 'transmittance';
 let currentCompound = null;
@@ -207,67 +207,5 @@ function toggleYAxisMode() {
     }
 }
 </script>
-       
-        // 显示所有化合物
-        function displayCompounds(compounds) {
-            const listDiv = document.getElementById('compoundList');
-            listDiv.innerHTML = '';
-            
-            compounds.forEach(compound => {
-                const card = document.createElement('div');
-                card.className = 'compound-card';
-                card.innerHTML = `
-                    <div class="compound-name">${compound.name}</div>
-                    <div class="compound-formula">${compound.formula}</div>
-                `;
-                card.onclick = () => showSpectrum(compound);
-                listDiv.appendChild(card);
-            });
-        }
-
-        // 显示谱图
-        function showSpectrum(compound) {
-            document.getElementById('chart-title').textContent = `${compound.name} (${compound.formula})`;
-            document.getElementById('plotly-chart').style.display = 'block';
-            
-            const trace = {
-                x: compound.x,
-                y: compound.y,
-                type: 'scatter',
-                mode: 'lines',
-                name: compound.name,
-                line: {
-                    color: '#3498db',
-                    width: 2
-                }
-            };
-
-            const layout = {
-                title: '红外光谱图',
-                xaxis: {
-                    title: '波数 (cm⁻¹)',
-                    autorange: 'reversed'
-                },
-                yaxis: {
-                    title: '透过率 (%)'
-                },
-                margin: { t: 50, r: 30, b: 50, l: 60 }
-            };
-
-            Plotly.newPlot('chart', [trace], layout);
-        }
-
-        // 搜索功能
-        function searchCompounds() {
-            const query = document.getElementById('searchInput').value.toLowerCase();
-            const filtered = spectraData.filter(c => 
-                c.name.toLowerCase().includes(query)
-            );
-            displayCompounds(filtered);
-        }
-
-        // 初始显示所有
-        displayCompounds(spectraData);
-    </script>
 </body>
 </html>
