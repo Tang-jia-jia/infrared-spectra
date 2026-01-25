@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>红外谱图数据库</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .search-box {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        input[type="text"] {
+            width: 60%;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            padding: 12px 24px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        .compound-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .compound-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .compound-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .compound-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        .compound-formula {
+            color: #7f8c8d;
+            font-style: italic;
+        }
+        #plotly-chart {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-height: 500px;
+        }
+        .loading {
+            text-align: center;
+            padding: 100px;
+            color: #999;
+            font-size: 18px;
+        }
+        /* 下载按钮样式 */
+        .download-buttons {
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+        .download-buttons button {
+            margin: 0 10px;
+            padding: 10px 20px;
+            font-size: 14px;
+        }
+        .btn-csv {
+            background: #27ae60 !important;
+        }
+        .btn-csv:hover {
+            background: #219a52 !important;
+        }
+        .btn-png {
+            background: #e74c3c !important;
+        }
+        .btn-png:hover {
+            background: #c0392b !important;
+        }
+    </style>
+</head>
+<body>
+    <h1>红外谱图数据库</h1>
+
+    <div class="search-box">
+        <input type="text" id="searchInput" placeholder="搜索样品名称">
+        <button onclick="searchCompounds()">搜索</button>
+    </div>
+    <!-- 在搜索框下方添加上传区域 -->
+<div style="background: #e8f5e9; padding: 20px; border-radius: 8px; margin: 30px 0;">
+    <h3 style="margin-top:0; color: #2e7d32;">🔼 上传新样品</h3>
+    <form id="uploadForm" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+        <input type="file" id="csvFile" accept=".csv" style="flex:1; min-width: 200px; padding: 8px;">
+        <input type="text" id="formulaInput" placeholder="分子式（如C6H6）" style="flex:1; min-width: 150px; padding: 8px;">
+        <button type="submit" style="background: #27ae60; padding: 10px 20px;">上传</button>
+    </form>
+    <div id="uploadStatus" style="margin-top: 15px; font-size: 14px; min-height: 20px;"></div>
+</div>
+
+    <div id="compoundList" class="compound-list"></div>
+
+    <div id="plotly-chart" style="display:none;">
+        <h2 id="chart-title"></h2>
+        <div id="chart"></div>
+        <div style="text-align: center; margin-top: 20px;">
+            <button id="toggleModeBtn" onclick="toggleYAxisMode()">切换到吸光度</button>
+        </div>
+    </div>
+
+    <!-- 加载索引和热数据 -->
+    <script src="spectra_index.js"></script>
+    <script src="spectra_hot.js"></script>
+
+    <script>
+        // ============================================================================
+        // 核心状态管理
+        // ============================================================================
+        let currentMode = 'transmittance';
+        let currentCompound = null;
+        let spectraCache = {};  // 冷数据缓存
+
+        // ============================================================================
+        // 数据转换函数
+        // ============================================================================
+        function transmittance_to_absorbance(T) {
+            if (T <= 0) return 4;
+            return -Math.log10(T / 100);
+        }
+
+        // ============================================================================
+        // 初始化
+        // ============================================================================
+        if (typeof spectraIndex !== 'undefined' && spectraIndex.length > 0) {
+            displayCompounds(spectraIndex);
+        } else {
+            document.getElementById('compoundList').innerHTML =
+                '<div style="color:red; text-align:center; padding:50px;">错误：无法加载化合物索引</div>';
+        }
+
+        // ============================================================================
+        // 显示化合物列表
+        // ============================================================================
+        function displayCompounds(indexData) {
+            const listDiv = document.getElementById('compoundList');
+            listDiv.innerHTML = '';
+
+            if (indexData.length === 0) {
+                listDiv.innerHTML = '<div style="text-align:center; color:#666; padding:50px;">没有找到匹配的化合物</div>';
+                return;
+            }
+
+            indexData.forEach(compound => {
+                const card = document.createElement('div');
+                card.className = 'compound-card';
+                card.innerHTML = `
+                    <div class="compound-name">${compound.name}</div>
+                    <div class="compound-formula">${compound.formula}</div>
+                `;
+                card.onclick = () => loadAndShowSpectrum(compound);
+                listDiv.appendChild(card);
+            });
+        }
+
+        // ============================================================================
+        // 加载谱图数据（混合方案核心）
+        // ============================================================================
+        function loadAndShowSpectrum(compoundInfo) {
+            const fileName = compoundInfo.file;
+
+            // 强制清除旧状态
+            currentCompound = null;
+            const chartDiv = document.getElementById('chart');
+            const titleDiv = document.getElementById('chart-title');
+
+            // 显示加载动画
+            document.getElementById('plotly-chart').style.display = 'block';
+            titleDiv.textContent = `${compoundInfo.name} (${compoundInfo.formula})`;
+            chartDiv.innerHTML = '<div class="loading">谱图加载中...</div>';
+
+            // ============================================================================
+            // 热数据分支
+            // ============================================================================
+            if (compoundInfo.is_hot && typeof spectraHot !== 'undefined') {
+                const hotData = spectraHot.find(c => c.name === compoundInfo.name);
+                if (hotData) {
+                    setTimeout(() => {
+                        currentCompound = hotData;
+                        showSpectrum(hotData);
+                    }, 10);
+                    return;
+                }
+            }
+
+            // ============================================================================
+            // 冷数据分支
+            // ============================================================================
+            if (spectraCache[fileName]) {
+                setTimeout(() => {
+                    currentCompound = spectraCache[fileName];
+                    showSpectrum(spectraCache[fileName]);
+                }, 10);
+                return;
+            }
+
+            // 加载冷数据JSON
+            fetch(`spectra/${fileName}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${fileName}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    spectraCache[fileName] = data;
+                    currentCompound = data;
+                    showSpectrum(data);
+                })
+                .catch(error => {
+                    console.error("❌ 加载失败:", error);
+                    chartDiv.innerHTML = `<div style="color:red;">加载失败: ${error.message}</div>`;
+                });
+        }
+
+        // ============================================================================
+        // 显示谱图（核心修复：dtick刻度 + 清除加载状态）
+        // ============================================================================
+        function showSpectrum(compound) {
+            // 防御性检查
+            if (!compound || !Array.isArray(compound.x) || !Array.isArray(compound.y)) {
+                document.getElementById('chart').innerHTML =
+                    '<div style="color:red; padding:50px; text-align:center;">错误: 数据格式不正确</div>';
+                return;
+            }
+
+            // 关键修复：清除加载状态
+            document.getElementById('chart').innerHTML = '';
+
+            let y_data, y_title, y_range, y_dtick;
+
+            if (currentMode === 'transmittance') {
+                y_data = compound.y;
+                y_title = '透过率 (%)';
+                y_range = [0, 100];
+                y_dtick = 20;  // 透过率每20一格
+            } else {
+                y_data = compound.y.map(transmittance_to_absorbance);
+                y_title = '吸光度 (A)';
+                y_range = [0, 6];
+                y_dtick = 0.5;  // 吸光度每0.5一格
+            }
+
+            const trace = {
+                x: compound.x,
+                y: y_data,
+                type: 'scatter',
+                mode: 'lines',
+                name: compound.name,
+                line: { color: '#3498db', width: 2 }
+            };
+
+            const layout = {
+                title: '红外光谱图',
+                xaxis: { title: '波数 (cm⁻¹)', autorange: 'reversed' },
+                yaxis: { title: y_title, range: y_range, dtick: y_dtick },
+                margin: { t: 50, r: 30, b: 50, l: 60 }
+            };
+
+            // 销毁旧图表
+            try {
+                Plotly.purge('chart');
+            } catch (e) {}
+
+            Plotly.newPlot('chart', [trace], layout);
+
+            // ============================================================================
+            // 下载按钮创建（关键修复：独立创建，不依赖setTimeout）
+            // ============================================================================
+            createDownloadButtons(compound);
+        }
+
+        // ============================================================================
+        // 下载按钮创建（修复：独立函数，确保执行）
+        // ============================================================================
+        function createDownloadButtons(compound) {
+            const chartDiv = document.getElementById('chart');
+            const plotlyChartDiv = document.getElementById('plotly-chart');
+
+            // 移除旧按钮
+            const oldButtons = plotlyChartDiv.querySelector('.download-buttons');
+            if (oldButtons) oldButtons.remove();
+
+            // 创建新按钮容器
+            const buttonDiv = document.createElement('div');
+            buttonDiv.className = 'download-buttons';
+
+            buttonDiv.innerHTML = `
+                <button class="btn-csv" onclick="downloadCSV('${compound.name}', ${JSON.stringify(compound.x)}, ${JSON.stringify(compound.y)})">
+                    📥 下载CSV数据
+                </button>
+                <button class="btn-png" onclick="downloadPNG('${compound.name}')">
+                    🖼️ 下载PNG图片
+                </button>
+            `;
+
+            // 将按钮添加到图表下方
+            plotlyChartDiv.insertBefore(buttonDiv, plotlyChartDiv.lastElementChild);
+        }
+
+        // ============================================================================
+        // 搜索功能
+        // ============================================================================
+        function searchCompounds() {
+            const query = document.getElementById('searchInput').value.toLowerCase().trim();
+
+            if (!query) {
+                displayCompounds(spectraIndex);
+                return;
+            }
+
+            if (!spectraIndex || !spectraIndex.length) return;
+
+            const filtered = spectraIndex.filter(c =>
+                c.name.toLowerCase().includes(query)
+            );
+            displayCompounds(filtered);
+        }
+
+        // ============================================================================
+        // 切换Y轴模式
+        // ============================================================================
+        function toggleYAxisMode() {
+            if (!currentCompound) {
+                alert('请先点击选择一个化合物样品，再切换显示模式！');
+                return;
+            }
+
+            const btn = document.getElementById('toggleModeBtn');
+
+            if (currentMode === 'transmittance') {
+                currentMode = 'absorbance';
+                btn.textContent = '切换到透过率';
+            } else {
+                currentMode = 'transmittance';
+                btn.textContent = '切换到吸光度';
+            }
+
+            showSpectrum(currentCompound);
+        }
+
+        // ============================================================================
+        // 下载功能（修复：确保数据有效）
+        // ============================================================================
+
+        // 下载CSV文件
+        function downloadCSV(compoundName, xData, yData) {
+            // 防御性检查
+            if (!xData || !yData || xData.length === 0 || xData.length !== yData.length) {
+                alert('错误：数据不完整或格式不正确');
+                return;
+            }
+
+            // 生成CSV内容
+            let csvContent = "Wavenumber (cm-1),Transmittance (%)\n";
+            for (let i = 0; i < xData.length; i++) {
+                csvContent += `${xData[i]},${yData[i]}\n`;
+            }
+
+            // 创建Blob对象
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+
+            // 创建下载链接
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `${compoundName.replace(/[/\\?%*:|"<>]/g, '_')}_光谱数据.csv`);
+            link.style.visibility = 'hidden';
+
+            // 触发下载
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            // 释放内存
+            setTimeout(() => URL.revokeObjectURL(url), 100);
+
+            console.log(`✅ CSV下载已触发: ${compoundName}`);
+        }
+
+        // 下载PNG图片（使用Plotly自带功能）
+        function downloadPNG(compoundName) {
+            const chartDiv = document.getElementById('chart');
+
+            // 检查是否有图表
+            if (!chartDiv.data || chartDiv.data.length === 0) {
+                alert('请先显示谱图再下载图片');
+                return;
+            }
+
+            // 使用Plotly的下载功能
+            Plotly.downloadImage(chartDiv, {
+                format: 'png',
+                width: 1200,
+                height: 700,
+                filename: `${compoundName.replace(/[/\\?%*:|"<>]/g, '_')}_红外光谱图`
+            });
+
+            console.log(`✅ PNG下载已触发: ${compoundName}`);
+        }
+   // ============================================================================
+// 上传功能（Vercel API）
+// ============================================================================
+
+document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const fileInput = document.getElementById('csvFile');
+    const formulaInput = document.getElementById('formulaInput');
+    const statusDiv = document.getElementById('uploadStatus');
+
+    // 验证
+    if (!fileInput.files[0]) {
+        statusDiv.innerHTML = '<span style="color:red;">❌ 请选择CSV文件</span>';
+        return;
+    }
+
+    statusDiv.innerHTML = '<span style="color:blue;">⏳ 正在上传...</span>';
+
+    try {
+        // 读取文件为Base64
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+
+        reader.onload = async function(e) {
+            // 转换为Base64（去除data URL前缀）
+            const base64Data = btoa(e.target.result);
+
+            // 调用上传API（Vercel会自动处理路由）
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    fileName: file.name,
+                    fileData: base64Data,
+                    formula: formulaInput.value || '未知'
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                statusDiv.innerHTML = '<span style="color:green;">✅ 上传成功！2秒后刷新数据...</span>';
+                // 清空表单
+                fileInput.value = '';
+                formulaInput.value = '';
+                // 重新加载数据（简单刷新）
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
+            } else {
+                statusDiv.innerHTML = `<span style="color:red;">❌ 上传失败: ${result.error}</span>`;
+                console.error('上传失败:', result);
+            }
+        };
+
+        reader.onerror = function() {
+            statusDiv.innerHTML = '<span style="color:red;">❌ 文件读取失败</span>';
+        };
+
+        reader.readAsBinaryString(file);
+
+    } catch (error) {
+        statusDiv.innerHTML = `<span style="color:red;">❌ 错误: ${error.message}</span>`;
+        console.error('上传错误:', error);
+    }
+});
+    </script>
+</body>
+</html>
